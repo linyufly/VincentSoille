@@ -61,7 +61,7 @@ const int dire[6][3] = {{-1, 0, 0}, {1, 0, 0},
 			{0, -1, 0}, {0, 1, 0},
 			{0, 0, -1}, {0, 0, 1}};
 
-const int laplacianDelta = 0; //4;
+const int laplacianDelta = 16;
 
 double ***ftleValues;
 double spacing[3];
@@ -107,6 +107,9 @@ void LoadGrid() {
 			}
 
 	printf("hMax = %lf, hMin = %lf\n", hMax, hMin);
+
+	/// DEBUG ///
+	dimensions[2] = 1;
 }
 
 void LaplacianSmoothing() {
@@ -170,6 +173,8 @@ void VincentSoille() {
 			}
 
 	for (int d = 0; d < dimensions[0] * dimensions[1] * dimensions[2]; ) {
+		//if (d >= 8000) break; // 1000, 4000, 6000
+
 		CellIndex idx = cellOrder[d];
 		double height = ftleValues[idx.x][idx.y][idx.z];
 
@@ -226,7 +231,13 @@ void VincentSoille() {
 
 				if (Outside(_x, _y, _z)) continue;
 
-				if (dist[_x][_y][_z] < curdist && (lab[_x][_y][_z] > 0 || lab[_x][_y][_z] == WSHED))
+				if (dist[_x][_y][_z] < curdist && (lab[_x][_y][_z] > 0 || lab[_x][_y][_z] == WSHED)) {
+					/// DEBUG ///
+					if (dist[_x][_y][_z] != curdist - 1) {
+						printf("Found unexpected dist\n");
+						exit(0);
+					}
+
 					if (lab[_x][_y][_z] > 0)
 						if (lab[idx.x][idx.y][idx.z] == MASK || lab[idx.x][idx.y][idx.z] == WSHED)
 							lab[idx.x][idx.y][idx.z] = lab[_x][_y][_z];
@@ -235,7 +246,7 @@ void VincentSoille() {
 					else // lab[_x][_y][_z] == WSHED
 						if (lab[idx.x][idx.y][idx.z] == MASK)
 							lab[idx.x][idx.y][idx.z] = WSHED;
-				else if (lab[_x][_y][_z] == MASK && dist[_x][_y][_z] == 0) { // (_x, _y, _z) is plateau voxel
+				} else if (lab[_x][_y][_z] == MASK && dist[_x][_y][_z] == 0) { // (_x, _y, _z) is plateau voxel
 					dist[_x][_y][_z] = curdist + 1;
 					queue.push(CellIndex(_x, _y, _z));
 				}
@@ -302,7 +313,10 @@ void VincentSoille() {
 		for (int j = 0; j < dimensions[1]; j++)
 			for (int k = 0; k < dimensions[2]; k++) {
 				int *pixel = static_cast<int *>(image->GetScalarPointer(i, j, k));
-				*pixel = !!lab[i][j][k];
+				*pixel = lab[i][j][k];
+
+				/// DEBUG ///
+				if (lab[i][j][k] == WSHED || lab[i][j][k] == INIT) *pixel = curlab * 2;
 			}
 
 	vtkSmartPointer<vtkXMLImageDataWriter> writer = vtkSmartPointer<vtkXMLImageDataWriter>::New();
@@ -314,6 +328,27 @@ void VincentSoille() {
 	writer->SetInputData(image);
 #endif
 
+	writer->Write();
+
+#if VTK_MAJOR_VERSION <= 5
+	image->SetNumberOfScalarComponents(1);
+	image->SetScalarTypeToDouble();
+#else
+	image->AllocateScalars(VTK_DOUBLE, 1);
+#endif
+
+	for (int i = 0; i < dimensions[0]; i++)
+		for (int j = 0; j < dimensions[1]; j++)
+			for (int k = 0; k < dimensions[2]; k++) {
+				double *pixel = static_cast<double *>(image->GetScalarPointer(i, j, k));
+				*pixel = ftleValues[i][j][k];
+
+				/// DEBUG ///
+				if (lab[i][j][k] == WSHED || lab[i][j][k] == INIT) *pixel = 0.0;
+				//printf("%lf\n", *pixel);
+			}
+
+	writer->SetFileName("ftle.vtk");
 	writer->Write();
 
 	DeleteCube(lab);
