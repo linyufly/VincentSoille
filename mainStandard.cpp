@@ -32,6 +32,16 @@ T ***CreateCube(int X, int Y, int Z) {
 
 template <class T>
 void DeleteCube(T ***cube) {
+/*
+	printf("size of double *** = %lu\n", sizeof(double ***));
+
+	printf("cube addr = %lu\n", cube);
+	printf("&cube[0] = %lu\n", &cube[0]);
+	printf("cube[0] addr = %lu\n", cube[0]);
+	printf("cube[0][0] addr = %lu\n", cube[0][0]);
+	printf("cube[0][0][0] val = %lf\n", cube[0][0][0]);
+	printf("&cube[0][0][0] = %lu\n", &cube[0][0][0]);
+*/
 	delete [] cube[0][0];
 	delete [] cube[0];
 	delete [] cube;
@@ -185,7 +195,7 @@ void VincentSoille() {
 
 				if (Outside(_x, _y, _z)) continue;
 
-				if (lab[_x][_y][_z] >= 0) {
+				if (lab[_x][_y][_z] > 0 || lab[_x][_y][_z] == WSHED) {
 					flag = true;
 					break;
 				}
@@ -221,20 +231,21 @@ void VincentSoille() {
 
 				if (Outside(_x, _y, _z)) continue;
 
-				if (dist[_x][_y][_z] < curdist && lab[_x][_y][_z] >= 0) {
+				if (dist[_x][_y][_z] < curdist && (lab[_x][_y][_z] > 0 || lab[_x][_y][_z] == WSHED)) {
 					/// DEBUG ///
 					if (dist[_x][_y][_z] != curdist - 1) {
 						printf("Found unexpected dist\n");
 						exit(0);
 					}
 
-					if (lab[_x][_y][_z] >= 0)
-						if (lab[idx.x][idx.y][idx.z] == MASK)
+					if (lab[_x][_y][_z] > 0)
+						if (lab[idx.x][idx.y][idx.z] == MASK || lab[idx.x][idx.y][idx.z] == WSHED)
 							lab[idx.x][idx.y][idx.z] = lab[_x][_y][_z];
-						else;
-					//else // lab[_x][_y][_z] == WSHED
-					//	if (lab[idx.x][idx.y][idx.z] == MASK)
-					//		lab[idx.x][idx.y][idx.z] = WSHED;
+						else if (lab[idx.x][idx.y][idx.z] != lab[_x][_y][_z])
+							lab[idx.x][idx.y][idx.z] = WSHED;
+					else // lab[_x][_y][_z] == WSHED
+						if (lab[idx.x][idx.y][idx.z] == MASK)
+							lab[idx.x][idx.y][idx.z] = WSHED;
 				} else if (lab[_x][_y][_z] == MASK && dist[_x][_y][_z] == 0) { // (_x, _y, _z) is plateau voxel
 					dist[_x][_y][_z] = curdist + 1;
 					queue.push(CellIndex(_x, _y, _z));
@@ -248,7 +259,7 @@ void VincentSoille() {
 			dist[idx.x][idx.y][idx.z] = 0;
 
 			if (lab[idx.x][idx.y][idx.z] == MASK) {
-				//curlab++;
+				curlab++;
 				queue.push(idx);
 				lab[idx.x][idx.y][idx.z] = curlab;
 				while (!queue.empty()) {
@@ -267,20 +278,19 @@ void VincentSoille() {
 						}
 					}
 				}
-				curlab++;
 			}
 		}
 
 		d = nextD;
 	}
 
-	int *labelColors = new int [curlab];
-	for (int i = 0; i < curlab; i++)
+	int *labelColors = new int [curlab + 1];
+	for (int i = 0; i <= curlab; i++)
 		labelColors[i] = i;
-	std::random_shuffle(labelColors, labelColors + curlab);
+	std::random_shuffle(labelColors, labelColors + curlab + 1);
 
 	printf("curlab = %d\n", curlab);
-/*
+
 	int numOfWatershedPixels = 0;
 
 	for (int i = 0; i < dimensions[0]; i++)
@@ -291,7 +301,7 @@ void VincentSoille() {
 				else if (lab[i][j][k] == 0) numOfWatershedPixels++;
 
 	printf("numOfWatershedPixels = %d\n", numOfWatershedPixels);
-*/
+
 	vtkSmartPointer<vtkImageData> image = vtkSmartPointer<vtkImageData>::New();
 	image->SetDimensions(dimensions);
 	image->SetOrigin(origin);
@@ -309,7 +319,8 @@ void VincentSoille() {
 			for (int k = 0; k < dimensions[2]; k++) {
 				int *pixel = static_cast<int *>(image->GetScalarPointer(i, j, k));
 				*pixel = lab[i][j][k];
-				if (lab[i][j][k] >= 0) *pixel = labelColors[*pixel];
+
+				if (*pixel >= 0) *pixel = labelColors[*pixel];
 				/// DEBUG ///
 				//if (lab[i][j][k] == WSHED || lab[i][j][k] == INIT) *pixel = curlab * 2;
 			}
@@ -341,7 +352,7 @@ void VincentSoille() {
 				*pixel = ftleValues[i][j][k];
 
 				/// DEBUG ///
-				//if (lab[i][j][k] == WSHED || lab[i][j][k] == INIT) *pixel = 0.0;
+				if (lab[i][j][k] == WSHED || lab[i][j][k] == INIT) *pixel = 0.0;
 				//printf("%lf\n", *pixel);
 			}
 
