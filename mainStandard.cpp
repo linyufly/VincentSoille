@@ -13,6 +13,7 @@ Author		:	Mingcheng Chen
 #include <vtkXMLImageDataWriter.h>
 
 #include <cstdio>
+#include <cmath>
 
 #include <queue>
 #include <limits>
@@ -57,11 +58,26 @@ struct CellIndex {
 	}
 };
 
-const int dire[6][3] = {{-1, 0, 0}, {1, 0, 0},
+const int dire[26][3] = {{-1, 0, 0}, {1, 0, 0},
 			{0, -1, 0}, {0, 1, 0},
-			{0, 0, -1}, {0, 0, 1}};
+			{0, 0, -1}, {0, 0, 1},
 
-const int laplacianDelta = 8;
+			{0, -1, -1}, {0, -1, 1},
+			{0, 1, -1}, {0, 1, 1},
+			{-1, 0, -1}, {-1, 0, 1},
+			{1, 0, -1}, {1, 0, 1},
+			{-1, -1, 0}, {-1, 1, 0},
+			{1, -1, 0,}, {1, 1, 0},
+
+			{-1, -1, -1}, {-1, -1, 1},
+			{-1, 1, -1}, {-1, 1, 1},
+			{1, -1, -1}, {1, -1, 1},
+			{1, 1, -1}, {1, 1, 1}
+			};
+
+const int numOfNeighbors = 26;
+const int kernelDelta = 10;
+const double pi = acos(-1.0);
 
 double ***ftleValues;
 double spacing[3];
@@ -112,6 +128,48 @@ void LoadGrid() {
 	dimensions[2] = 1;
 }
 
+double Sqr(double a) {
+	return a * a;
+}
+
+double Gaussian(double x) {
+	double sigma = kernelDelta / 3.0;
+	return exp(-Sqr(x) / (2 * Sqr(sigma))) / (sqrt(2 * pi) * sigma);
+}
+
+void GaussianSmoothing() {
+	printf("GaussianSmoothing()\n");
+
+	double ***tempValues = CreateCube<double>(dimensions[0], dimensions[1], dimensions[2]);
+
+	for (int i = 0; i < dimensions[0]; i++)
+		for (int j = 0; j < dimensions[1]; j++)
+			for (int k = 0; k < dimensions[2]; k++) {
+				tempValues[i][j][k] = 0;
+				double sumOfWeight = 0;
+				for (int dx = -kernelDelta; dx <= kernelDelta; dx++)
+					for (int dy = -kernelDelta; dy <= kernelDelta; dy++)
+						for (int dz = -kernelDelta; dz <= kernelDelta; dz++) {
+							int x = i + dx;
+							int y = j + dy;
+							int z = k + dz;
+
+							if (Outside(x, y, z)) continue;	
+
+							double weight = Gaussian(dx) * Gaussian(dy) * Gaussian(dz);
+							sumOfWeight += weight;
+							tempValues[i][j][k] += ftleValues[x][y][z] * weight;
+						}
+				tempValues[i][j][k] /= sumOfWeight;
+			}
+
+	std::swap(ftleValues, tempValues);
+
+	DeleteCube(tempValues);
+
+	printf("Done.\n\n");
+}
+
 void LaplacianSmoothing() {
 	printf("LaplacianSmoothing()\n");
 
@@ -122,9 +180,9 @@ void LaplacianSmoothing() {
 			for (int k = 0; k < dimensions[2]; k++) {
 				tempValues[i][j][k] = 0;
 				int cnt = 0;
-				for (int dx = -laplacianDelta; dx <= laplacianDelta; dx++)
-					for (int dy = -laplacianDelta; dy <= laplacianDelta; dy++)
-						for (int dz = -laplacianDelta; dz <= laplacianDelta; dz++) {
+				for (int dx = -kernelDelta; dx <= kernelDelta; dx++)
+					for (int dy = -kernelDelta; dy <= kernelDelta; dy++)
+						for (int dz = -kernelDelta; dz <= kernelDelta; dz++) {
 							int x = i + dx;
 							int y = j + dy;
 							int z = k + dz;
@@ -178,17 +236,26 @@ void VincentSoille() {
 		CellIndex idx = cellOrder[d];
 		double height = ftleValues[idx.x][idx.y][idx.z];
 
+		//if (height > ftleValues[85][69][0]) { // ==
+		//	printf("%d %d %d: break\n", idx.x, idx.y, idx.z);
+		//	break;
+		//}
+
 		int nextD;
 		for (nextD = d; nextD < dimensions[0] * dimensions[1] * dimensions[2] &&
 				ftleValues[cellOrder[nextD].x][cellOrder[nextD].y][cellOrder[nextD].z] == height;
-				nextD++);
+				nextD++) {
+			/// DEBUG ///
+			if (height == ftleValues[85][69][0])
+				printf("* %d %d %d\n", cellOrder[nextD].x, cellOrder[nextD].y, cellOrder[nextD].z);
+		}
 		
 		for (int i = d; i < nextD; i++) {
 			idx = cellOrder[i];
 			lab[idx.x][idx.y][idx.z] = MASK;
 
 			bool flag = false;
-			for (int k = 0; k < 6; k++) {
+			for (int k = 0; k < numOfNeighbors; k++) {
 				int _x = idx.x + dire[k][0];
 				int _y = idx.y + dire[k][1];
 				int _z = idx.z + dire[k][2];
@@ -224,7 +291,7 @@ void VincentSoille() {
 				queue.pop();
 			}
 
-			for (int k = 0; k < 6; k++) {
+			for (int k = 0; k < numOfNeighbors; k++) {
 				int _x = idx.x + dire[k][0];
 				int _y = idx.y + dire[k][1];
 				int _z = idx.z + dire[k][2];
@@ -265,7 +332,7 @@ void VincentSoille() {
 				while (!queue.empty()) {
 					idx = queue.front();
 					queue.pop();
-					for (int k = 0; k < 6; k++) {
+					for (int k = 0; k < numOfNeighbors; k++) {
 						int _x = idx.x + dire[k][0];
 						int _y = idx.y + dire[k][1];
 						int _z = idx.z + dire[k][2];
@@ -297,7 +364,7 @@ void VincentSoille() {
 		for (int j = 0; j < dimensions[1]; j++)
 			for (int k = 0; k < dimensions[2]; k++)
 				if (lab[i][j][k] < 0)
-					printf("lab[%d][%d][%d] = %d\n", i, j, k, lab[i][j][k]);
+					;//printf("lab[%d][%d][%d] = %d\n", i, j, k, lab[i][j][k]);
 				else if (lab[i][j][k] == 0) numOfWatershedPixels++;
 
 	printf("numOfWatershedPixels = %d\n", numOfWatershedPixels);
@@ -309,18 +376,20 @@ void VincentSoille() {
 
 #if VTK_MAJOR_VERSION <= 5
 	image->SetNumberOfScalarComponents(1);
-	image->SetScalarTypeToInt();
+	image->SetScalarTypeToDouble();
 #else
-	image->AllocateScalars(VTK_INT, 1);
+	image->AllocateScalars(VTK_DOUBLE, 1);
 #endif
 
 	for (int i = 0; i < dimensions[0]; i++)
 		for (int j = 0; j < dimensions[1]; j++)
 			for (int k = 0; k < dimensions[2]; k++) {
-				int *pixel = static_cast<int *>(image->GetScalarPointer(i, j, k));
+				double *pixel = static_cast<double *>(image->GetScalarPointer(i, j, k));
 				*pixel = lab[i][j][k];
 
-				if (*pixel >= 0) *pixel = labelColors[*pixel];
+				if (*pixel >= 0) *pixel = labelColors[(int)*pixel];
+
+				*pixel /= curlab * 2;
 				/// DEBUG ///
 				//if (lab[i][j][k] == WSHED || lab[i][j][k] == INIT) *pixel = curlab * 2;
 			}
@@ -352,7 +421,7 @@ void VincentSoille() {
 				*pixel = ftleValues[i][j][k];
 
 				/// DEBUG ///
-				if (lab[i][j][k] == WSHED || lab[i][j][k] == INIT) *pixel = 0.0;
+				//if (lab[i][j][k] == WSHED || lab[i][j][k] == INIT) *pixel = 0.0;
 				//printf("%lf\n", *pixel);
 			}
 
@@ -371,6 +440,7 @@ int main() {
 	DeleteCube(cube);
 	*/
 	LoadGrid();
+	//GaussianSmoothing();
 	LaplacianSmoothing();
 	VincentSoille();
 	
