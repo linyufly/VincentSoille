@@ -13,10 +13,12 @@ Author		:	Mingcheng Chen
 #include <vtkXMLImageDataWriter.h>
 
 #include <cstdio>
+#include <cmath>
 
 #include <queue>
 #include <limits>
 #include <algorithm>
+#include <map>
 
 template <class T>
 T ***CreateCube(int X, int Y, int Z) {
@@ -47,11 +49,26 @@ struct CellIndex {
 	}
 };
 
-const int dire[6][3] = {{-1, 0, 0}, {1, 0, 0},
+const int dire[26][3] = {{-1, 0, 0}, {1, 0, 0},
 			{0, -1, 0}, {0, 1, 0},
-			{0, 0, -1}, {0, 0, 1}};
+			{0, 0, -1}, {0, 0, 1},
 
-const int laplacianDelta = 8;
+			{0, -1, -1}, {0, -1, 1},
+			{0, 1, -1}, {0, 1, 1},
+			{-1, 0, -1}, {-1, 0, 1},
+			{1, 0, -1}, {1, 0, 1},
+			{-1, -1, 0}, {-1, 1, 0},
+			{1, -1, 0,}, {1, 1, 0},
+
+			{-1, -1, -1}, {-1, -1, 1},
+			{-1, 1, -1}, {-1, 1, 1},
+			{1, -1, -1}, {1, -1, 1},
+			{1, 1, -1}, {1, 1, 1}
+			};
+
+const int numOfNeighbors = 26;
+const int kernelDelta = 1; //10;
+const double pi = acos(-1.0);
 
 double ***ftleValues;
 double spacing[3];
@@ -71,7 +88,7 @@ bool Outside(int x, int y, int z) {
 
 void LoadGrid() {
 	vtkSmartPointer<vtkStructuredPointsReader> reader = vtkSmartPointer<vtkStructuredPointsReader>::New();
-	reader->SetFileName("output.vtk");
+	reader->SetFileName("output_200.vtk");
 	reader->Update();
 
 	vtkStructuredPoints *structPoints = reader->GetOutput();
@@ -102,6 +119,48 @@ void LoadGrid() {
 	dimensions[2] = 1;
 }
 
+double Sqr(double a) {
+	return a * a;
+}
+
+double Gaussian(double x) {
+	double sigma = kernelDelta / 3.0;
+	return exp(-Sqr(x) / (2 * Sqr(sigma))) / (sqrt(2 * pi) * sigma);
+}
+
+void GaussianSmoothing() {
+	printf("GaussianSmoothing()\n");
+
+	double ***tempValues = CreateCube<double>(dimensions[0], dimensions[1], dimensions[2]);
+
+	for (int i = 0; i < dimensions[0]; i++)
+		for (int j = 0; j < dimensions[1]; j++)
+			for (int k = 0; k < dimensions[2]; k++) {
+				tempValues[i][j][k] = 0;
+				double sumOfWeight = 0;
+				for (int dx = -kernelDelta; dx <= kernelDelta; dx++)
+					for (int dy = -kernelDelta; dy <= kernelDelta; dy++)
+						for (int dz = -kernelDelta; dz <= kernelDelta; dz++) {
+							int x = i + dx;
+							int y = j + dy;
+							int z = k + dz;
+
+							if (Outside(x, y, z)) continue;	
+
+							double weight = Gaussian(dx) * Gaussian(dy) * Gaussian(dz);
+							sumOfWeight += weight;
+							tempValues[i][j][k] += ftleValues[x][y][z] * weight;
+						}
+				tempValues[i][j][k] /= sumOfWeight;
+			}
+
+	std::swap(ftleValues, tempValues);
+
+	DeleteCube(tempValues);
+
+	printf("Done.\n\n");
+}
+
 void LaplacianSmoothing() {
 	printf("LaplacianSmoothing()\n");
 
@@ -112,9 +171,9 @@ void LaplacianSmoothing() {
 			for (int k = 0; k < dimensions[2]; k++) {
 				tempValues[i][j][k] = 0;
 				int cnt = 0;
-				for (int dx = -laplacianDelta; dx <= laplacianDelta; dx++)
-					for (int dy = -laplacianDelta; dy <= laplacianDelta; dy++)
-						for (int dz = -laplacianDelta; dz <= laplacianDelta; dz++) {
+				for (int dx = -kernelDelta; dx <= kernelDelta; dx++)
+					for (int dy = -kernelDelta; dy <= kernelDelta; dy++)
+						for (int dz = -kernelDelta; dz <= kernelDelta; dz++) {
 							int x = i + dx;
 							int y = j + dy;
 							int z = k + dz;
@@ -138,6 +197,39 @@ void LaplacianSmoothing() {
 #define MASK -2
 #define WSHED 0
 #define FICTITIOUS CellIndex(-1, -1, -1)
+
+void RemoveWatershedPixels(int ***lab) {
+	bool flag = true;
+	while (flag) {
+		flag = false;
+		for (int x = 0; x < dimensions[0]; x++)
+			for (int y = 0; y < dimensions[1]; y++)
+				for (int z = 0; z < dimensions[2]; z++)
+					if (lab[x][y][z] == WSHED) {
+						flag = true;
+						std::map<int, int> counter;
+						for (int k = 0; k < numOfNeighbors; k++) {
+							int _x = x + dire[k][0];
+							int _y = y + dire[k][1];
+							int _z = z + dire[k][2];
+							if (Outside(_x, _y, _z)) continue;
+							if (lab[_x][_y][_z] != WSHED && lab[_x][_y][_z] != INIT) {
+								int value = lab[_x][_y][_z];
+								if (counter.find(value) == counter.end()) counter[value] = 1;
+								else counter[value]++;
+							}
+						}
+						int bestLabel = -1;
+						int maxCnt = 0;
+						for (std::map<int, int>::iterator itr = counter.begin(); itr != counter.end(); itr++)
+							if (itr->second > maxCnt) {
+								maxCnt = itr->second;
+								bestLabel = itr->first;
+							}
+						if (maxCnt > 0) lab[x][y][z] = bestLabel;
+					}
+	}
+}
 
 void VincentSoille() {
 	CellIndex *cellOrder = new CellIndex[dimensions[0] * dimensions[1] * dimensions[2]];
@@ -168,24 +260,33 @@ void VincentSoille() {
 		CellIndex idx = cellOrder[d];
 		double height = ftleValues[idx.x][idx.y][idx.z];
 
+		//if (height > ftleValues[85][69][0]) { // ==
+		//	printf("%d %d %d: break\n", idx.x, idx.y, idx.z);
+		//	break;
+		//}
+
 		int nextD;
 		for (nextD = d; nextD < dimensions[0] * dimensions[1] * dimensions[2] &&
 				ftleValues[cellOrder[nextD].x][cellOrder[nextD].y][cellOrder[nextD].z] == height;
-				nextD++);
+				nextD++) {
+			/// DEBUG ///
+			if (height == ftleValues[85][69][0])
+				printf("* %d %d %d\n", cellOrder[nextD].x, cellOrder[nextD].y, cellOrder[nextD].z);
+		}
 		
 		for (int i = d; i < nextD; i++) {
 			idx = cellOrder[i];
 			lab[idx.x][idx.y][idx.z] = MASK;
 
 			bool flag = false;
-			for (int k = 0; k < 6; k++) {
+			for (int k = 0; k < numOfNeighbors; k++) {
 				int _x = idx.x + dire[k][0];
 				int _y = idx.y + dire[k][1];
 				int _z = idx.z + dire[k][2];
 
 				if (Outside(_x, _y, _z)) continue;
 
-				if (lab[_x][_y][_z] >= 0) {
+				if (lab[_x][_y][_z] > 0 || lab[_x][_y][_z] == WSHED) {
 					flag = true;
 					break;
 				}
@@ -214,27 +315,28 @@ void VincentSoille() {
 				queue.pop();
 			}
 
-			for (int k = 0; k < 6; k++) {
+			for (int k = 0; k < numOfNeighbors; k++) {
 				int _x = idx.x + dire[k][0];
 				int _y = idx.y + dire[k][1];
 				int _z = idx.z + dire[k][2];
 
 				if (Outside(_x, _y, _z)) continue;
 
-				if (dist[_x][_y][_z] < curdist && lab[_x][_y][_z] >= 0) {
+				if (dist[_x][_y][_z] < curdist && (lab[_x][_y][_z] > 0 || lab[_x][_y][_z] == WSHED)) {
 					/// DEBUG ///
 					if (dist[_x][_y][_z] != curdist - 1) {
 						printf("Found unexpected dist\n");
 						exit(0);
 					}
 
-					if (lab[_x][_y][_z] >= 0)
-						if (lab[idx.x][idx.y][idx.z] == MASK)
+					if (lab[_x][_y][_z] > 0)
+						if (lab[idx.x][idx.y][idx.z] == MASK || lab[idx.x][idx.y][idx.z] == WSHED)
 							lab[idx.x][idx.y][idx.z] = lab[_x][_y][_z];
-						else;
-					//else // lab[_x][_y][_z] == WSHED
-					//	if (lab[idx.x][idx.y][idx.z] == MASK)
-					//		lab[idx.x][idx.y][idx.z] = WSHED;
+						else if (lab[idx.x][idx.y][idx.z] != lab[_x][_y][_z])
+							lab[idx.x][idx.y][idx.z] = WSHED;
+					else // lab[_x][_y][_z] == WSHED
+						if (lab[idx.x][idx.y][idx.z] == MASK)
+							lab[idx.x][idx.y][idx.z] = WSHED;
 				} else if (lab[_x][_y][_z] == MASK && dist[_x][_y][_z] == 0) { // (_x, _y, _z) is plateau voxel
 					dist[_x][_y][_z] = curdist + 1;
 					queue.push(CellIndex(_x, _y, _z));
@@ -248,13 +350,13 @@ void VincentSoille() {
 			dist[idx.x][idx.y][idx.z] = 0;
 
 			if (lab[idx.x][idx.y][idx.z] == MASK) {
-				//curlab++;
+				curlab++;
 				queue.push(idx);
 				lab[idx.x][idx.y][idx.z] = curlab;
 				while (!queue.empty()) {
 					idx = queue.front();
 					queue.pop();
-					for (int k = 0; k < 6; k++) {
+					for (int k = 0; k < numOfNeighbors; k++) {
 						int _x = idx.x + dire[k][0];
 						int _y = idx.y + dire[k][1];
 						int _z = idx.z + dire[k][2];
@@ -267,31 +369,32 @@ void VincentSoille() {
 						}
 					}
 				}
-				curlab++;
 			}
 		}
 
 		d = nextD;
 	}
 
-	int *labelColors = new int [curlab];
-	for (int i = 0; i < curlab; i++)
+	RemoveWatershedPixels(lab);
+
+	int *labelColors = new int [curlab + 1];
+	for (int i = 0; i <= curlab; i++)
 		labelColors[i] = i;
-	std::random_shuffle(labelColors, labelColors + curlab);
+	std::random_shuffle(labelColors, labelColors + curlab + 1);
 
 	printf("curlab = %d\n", curlab);
-/*
+
 	int numOfWatershedPixels = 0;
 
 	for (int i = 0; i < dimensions[0]; i++)
 		for (int j = 0; j < dimensions[1]; j++)
 			for (int k = 0; k < dimensions[2]; k++)
 				if (lab[i][j][k] < 0)
-					printf("lab[%d][%d][%d] = %d\n", i, j, k, lab[i][j][k]);
+					;//printf("lab[%d][%d][%d] = %d\n", i, j, k, lab[i][j][k]);
 				else if (lab[i][j][k] == 0) numOfWatershedPixels++;
 
 	printf("numOfWatershedPixels = %d\n", numOfWatershedPixels);
-*/
+
 	vtkSmartPointer<vtkImageData> image = vtkSmartPointer<vtkImageData>::New();
 	image->SetDimensions(dimensions);
 	image->SetOrigin(origin);
@@ -299,17 +402,20 @@ void VincentSoille() {
 
 #if VTK_MAJOR_VERSION <= 5
 	image->SetNumberOfScalarComponents(1);
-	image->SetScalarTypeToInt();
+	image->SetScalarTypeToDouble();
 #else
-	image->AllocateScalars(VTK_INT, 1);
+	image->AllocateScalars(VTK_DOUBLE, 1);
 #endif
 
 	for (int i = 0; i < dimensions[0]; i++)
 		for (int j = 0; j < dimensions[1]; j++)
 			for (int k = 0; k < dimensions[2]; k++) {
-				int *pixel = static_cast<int *>(image->GetScalarPointer(i, j, k));
+				double *pixel = static_cast<double *>(image->GetScalarPointer(i, j, k));
 				*pixel = lab[i][j][k];
-				if (lab[i][j][k] >= 0) *pixel = labelColors[*pixel];
+
+				if (*pixel >= 0) *pixel = labelColors[(int)*pixel];
+
+				*pixel /= curlab * 2;
 				/// DEBUG ///
 				//if (lab[i][j][k] == WSHED || lab[i][j][k] == INIT) *pixel = curlab * 2;
 			}
@@ -360,7 +466,9 @@ int main() {
 	DeleteCube(cube);
 	*/
 	LoadGrid();
-	LaplacianSmoothing();
+	//GaussianSmoothing();
+	for (int i = 0; i < 40; i++)
+		LaplacianSmoothing();
 	VincentSoille();
 	
 	DeleteCube(ftleValues);
