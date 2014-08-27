@@ -89,6 +89,8 @@ bool Outside(int x, int y, int z) {
 void LoadGrid() {
 	vtkSmartPointer<vtkStructuredPointsReader> reader = vtkSmartPointer<vtkStructuredPointsReader>::New();
 	reader->SetFileName("output_200.vtk");
+	//reader->SetFileName("bkd_003125.230-binary.vtk");
+	//reader->SetFileName("output.vtk");
 	reader->Update();
 
 	vtkStructuredPoints *structPoints = reader->GetOutput();
@@ -98,6 +100,7 @@ void LoadGrid() {
 
 	printf("origin: %lf %lf %lf\n", origin[0], origin[1], origin[2]);
 	printf("spacing: %lf %lf %lf\n", spacing[0], spacing[1], spacing[2]);
+	printf("dimensions: %d %d %d\n", dimensions[0], dimensions[1], dimensions[2]);
 
 	ftleValues = CreateCube<double>(dimensions[0], dimensions[1], dimensions[2]);
 
@@ -116,7 +119,7 @@ void LoadGrid() {
 	printf("hMax = %lf, hMin = %lf\n", hMax, hMin);
 
 	/// DEBUG ///
-	dimensions[2] = 1;
+	//dimensions[1] = 1;
 }
 
 double Sqr(double a) {
@@ -198,6 +201,34 @@ void LaplacianSmoothing() {
 #define WSHED 0
 #define FICTITIOUS CellIndex(-1, -1, -1)
 
+void FillWatershedPixels(int ***lab) {
+	for (int x = 0; x < dimensions[0]; x++)
+		for (int y = 0; y < dimensions[1]; y++)
+			for (int z = 0; z < dimensions[2]; z++)
+				if (lab[x][y][z] != WSHED && lab[x][y][z] != INIT) {
+					int mark = lab[x][y][z];
+					for (int k = 0; k < numOfNeighbors; k++) {
+						int _x = x + dire[k][0];
+						int _y = y + dire[k][1];
+						int _z = z + dire[k][2];
+						if (Outside(_x, _y, _z)) continue;
+						if (lab[_x][_y][_z] == WSHED || lab[_x][_y][_z] == INIT) continue;
+						if (mark != lab[_x][_y][_z]) {
+							mark = WSHED;
+							break;
+						}
+					}
+					lab[x][y][z] = mark;
+				}
+	for (int x = 0; x < dimensions[0]; x++)
+		for (int y = 0; y < dimensions[1]; y++)
+			for (int z = 0; z < dimensions[2]; z++)
+				if (lab[x][y][z] != WSHED && lab[x][y][z] != INIT)
+					lab[x][y][z] = 0;
+				else
+					lab[x][y][z] = 1;
+}
+
 void RemoveWatershedPixels(int ***lab) {
 	bool flag = true;
 	while (flag) {
@@ -270,8 +301,8 @@ void VincentSoille() {
 				ftleValues[cellOrder[nextD].x][cellOrder[nextD].y][cellOrder[nextD].z] == height;
 				nextD++) {
 			/// DEBUG ///
-			if (height == ftleValues[85][69][0])
-				printf("* %d %d %d\n", cellOrder[nextD].x, cellOrder[nextD].y, cellOrder[nextD].z);
+			//if (height == ftleValues[85][69][0])
+			//	printf("* %d %d %d\n", cellOrder[nextD].x, cellOrder[nextD].y, cellOrder[nextD].z);
 		}
 		
 		for (int i = d; i < nextD; i++) {
@@ -375,12 +406,14 @@ void VincentSoille() {
 		d = nextD;
 	}
 
-	RemoveWatershedPixels(lab);
+	FillWatershedPixels(lab);
+	curlab = 1;
+	//RemoveWatershedPixels(lab);
 
 	int *labelColors = new int [curlab + 1];
 	for (int i = 0; i <= curlab; i++)
 		labelColors[i] = i;
-	std::random_shuffle(labelColors, labelColors + curlab + 1);
+	//std::random_shuffle(labelColors, labelColors + curlab + 1);
 
 	printf("curlab = %d\n", curlab);
 
@@ -415,7 +448,7 @@ void VincentSoille() {
 
 				if (*pixel >= 0) *pixel = labelColors[(int)*pixel];
 
-				*pixel /= curlab * 2;
+				//*pixel /= curlab * 2;
 				/// DEBUG ///
 				//if (lab[i][j][k] == WSHED || lab[i][j][k] == INIT) *pixel = curlab * 2;
 			}
@@ -444,7 +477,7 @@ void VincentSoille() {
 		for (int j = 0; j < dimensions[1]; j++)
 			for (int k = 0; k < dimensions[2]; k++) {
 				double *pixel = static_cast<double *>(image->GetScalarPointer(i, j, k));
-				*pixel = ftleValues[i][j][k];
+				*pixel *= ftleValues[i][j][k];  // assuming FTLE is all larger than 0
 
 				/// DEBUG ///
 				//if (lab[i][j][k] == WSHED || lab[i][j][k] == INIT) *pixel = 0.0;
@@ -467,8 +500,10 @@ int main() {
 	*/
 	LoadGrid();
 	//GaussianSmoothing();
+	/*
 	for (int i = 0; i < 40; i++)
 		LaplacianSmoothing();
+	*/
 	VincentSoille();
 	
 	DeleteCube(ftleValues);
