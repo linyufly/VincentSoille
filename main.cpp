@@ -5,10 +5,13 @@ Author		:	Mingcheng Chen
 
 #include <vtkVersion.h>
 #include <vtkStructuredPointsReader.h>
+#include <vtkStructuredPointsWriter.h>
 #include <vtkStructuredPoints.h>
 #include <vtkSmartPointer.h>
 #include <vtkPointData.h>
 #include <vtkDataArray.h>
+#include <vtkDoubleArray.h>
+#include <vtkIntArray.h>
 #include <vtkImageData.h>
 #include <vtkXMLImageDataWriter.h>
 
@@ -88,7 +91,9 @@ bool Outside(int x, int y, int z) {
 
 void LoadGrid() {
 	vtkSmartPointer<vtkStructuredPointsReader> reader = vtkSmartPointer<vtkStructuredPointsReader>::New();
-	reader->SetFileName("output_200.vtk");
+	reader->SetFileName("gyre_half.vtk");
+	//reader->SetFileName("lcsFTLEValues.vtk");
+	//reader->SetFileName("output_200.vtk");
 	//reader->SetFileName("bkd_003125.230-binary.vtk");
 	//reader->SetFileName("output.vtk");
 	reader->Update();
@@ -406,14 +411,14 @@ void VincentSoille() {
 		d = nextD;
 	}
 
-	FillWatershedPixels(lab);
-	curlab = 1;
-	//RemoveWatershedPixels(lab);
+	//FillWatershedPixels(lab);
+	//curlab = 1;
+	RemoveWatershedPixels(lab);
 
 	int *labelColors = new int [curlab + 1];
 	for (int i = 0; i <= curlab; i++)
 		labelColors[i] = i;
-	//std::random_shuffle(labelColors, labelColors + curlab + 1);
+	std::random_shuffle(labelColors, labelColors + curlab + 1);
 
 	printf("curlab = %d\n", curlab);
 
@@ -427,6 +432,43 @@ void VincentSoille() {
 				else if (lab[i][j][k] == 0) numOfWatershedPixels++;
 
 	printf("numOfWatershedPixels = %d\n", numOfWatershedPixels);
+
+	/* Write to vtkStructuredPoints */
+	vtkSmartPointer<vtkStructuredPoints> result = vtkSmartPointer<vtkStructuredPoints>::New();
+	result->SetDimensions(dimensions);
+	result->SetOrigin(origin);
+	result->SetSpacing(spacing);
+	vtkSmartPointer<vtkIntArray> region_code = vtkSmartPointer<vtkIntArray>::New();
+	region_code->SetName("region");
+	region_code->SetNumberOfComponents(1);
+	region_code->SetNumberOfTuples(dimensions[0] * dimensions[1] * dimensions[2]);
+
+	vtkSmartPointer<vtkDoubleArray> ftle_value = vtkSmartPointer<vtkDoubleArray>::New();
+	ftle_value->SetName("ftle");
+	ftle_value->SetNumberOfComponents(1);
+	ftle_value->SetNumberOfTuples(dimensions[0] * dimensions[1] * dimensions[2]);
+
+	for (int x = 0; x < dimensions[0]; x++) {
+		for (int y = 0; y < dimensions[1]; y++) {
+			for (int z = 0; z < dimensions[2]; z++) {
+				int index = (z * dimensions[1] + y) * dimensions[0] + x;
+				region_code->SetTuple1(index, labelColors[lab[x][y][z]]);
+				ftle_value->SetTuple1(index, ftleValues[x][y][z]);
+			}
+		}
+ 	}
+
+	result->GetPointData()->SetScalars(region_code);
+	//result->GetPointData()->SetScalars(ftle_value);
+
+	result->PrintSelf(std::cout, vtkIndent(0));
+
+	vtkSmartPointer<vtkStructuredPointsWriter> s_writer = vtkSmartPointer<vtkStructuredPointsWriter>::New();
+	s_writer->SetInputData(result);
+	s_writer->SetFileName("int_watershed.vtk");
+	s_writer->Write();
+	
+	/* End of write */
 
 	vtkSmartPointer<vtkImageData> image = vtkSmartPointer<vtkImageData>::New();
 	image->SetDimensions(dimensions);
