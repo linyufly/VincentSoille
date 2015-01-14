@@ -69,7 +69,7 @@ const int dire[26][3] = {{-1, 0, 0}, {1, 0, 0},
 			{1, 1, -1}, {1, 1, 1}
 			};
 
-const int numOfNeighbors = 26;
+const int numOfNeighbors = 6; //26;
 const int kernelDelta = 1; //10;
 const double pi = acos(-1.0);
 
@@ -91,11 +91,12 @@ bool Outside(int x, int y, int z) {
 
 void LoadGrid() {
 	vtkSmartPointer<vtkStructuredPointsReader> reader = vtkSmartPointer<vtkStructuredPointsReader>::New();
-	reader->SetFileName("gyre_half.vtk");
+	//reader->SetFileName("gyre_half.vtk");
 	//reader->SetFileName("lcsFTLEValues.vtk");
 	//reader->SetFileName("output_200.vtk");
 	//reader->SetFileName("bkd_003125.230-binary.vtk");
 	//reader->SetFileName("output.vtk");
+        reader->SetFileName("../WatershedSurface/data/sphere_ftle.vtk");
 	reader->Update();
 
 	vtkStructuredPoints *structPoints = reader->GetOutput();
@@ -351,6 +352,15 @@ void VincentSoille() {
 				queue.pop();
 			}
 
+			/// DEBUG ///
+			/*
+                        if (idx.x == 76 && idx.y == 93 && idx.z == 105) {
+				printf("Found 76, 93, 105!\n");
+				printf("lab[%d][%d][%d] = %d\n", idx.x, idx.y, idx.z, lab[idx.x][idx.y][idx.z]);
+                                // exit(0);
+			}
+			*/
+
 			for (int k = 0; k < numOfNeighbors; k++) {
 				int _x = idx.x + dire[k][0];
 				int _y = idx.y + dire[k][1];
@@ -358,6 +368,15 @@ void VincentSoille() {
 
 				if (Outside(_x, _y, _z)) continue;
 
+				/// DEBUG ///
+				/*
+				if (idx.x == 76 && idx.y == 93 && idx.z == 105) {
+					printf("_x, _y, _z = %d, %d, %d\n", _x, _y, _z);
+					printf("lab[%d][%d][%d] = %d\n", _x, _y, _z, lab[_x][_y][_z]);
+					printf("dist[%d][%d][%d] = %d\n", _x, _y, _z, dist[_x][_y][_z]);
+					printf("curdist = %d\n", curdist);
+				}
+				*/
 				if (dist[_x][_y][_z] < curdist && (lab[_x][_y][_z] > 0 || lab[_x][_y][_z] == WSHED)) {
 					/// DEBUG ///
 					if (dist[_x][_y][_z] != curdist - 1) {
@@ -365,19 +384,39 @@ void VincentSoille() {
 						exit(0);
 					}
 
-					if (lab[_x][_y][_z] > 0)
+					/// DEBUG ///
+					/*
+					if (idx.x == 76 && idx.y == 93 && idx.z == 105) {
+						printf("We have come here!\n");
+						printf("lab[_x][_y][_z] = %d\n", lab[_x][_y][_z]);
+					}
+					*/
+					if (lab[_x][_y][_z] > 0) {
 						if (lab[idx.x][idx.y][idx.z] == MASK || lab[idx.x][idx.y][idx.z] == WSHED)
 							lab[idx.x][idx.y][idx.z] = lab[_x][_y][_z];
 						else if (lab[idx.x][idx.y][idx.z] != lab[_x][_y][_z])
 							lab[idx.x][idx.y][idx.z] = WSHED;
-					else // lab[_x][_y][_z] == WSHED
-						if (lab[idx.x][idx.y][idx.z] == MASK)
+					} else { // lab[_x][_y][_z] == WSHED
+						if (lab[idx.x][idx.y][idx.z] == MASK) {
 							lab[idx.x][idx.y][idx.z] = WSHED;
+							/// DEBUG ///
+							// printf("New watershed created!\n");
+						}
+					}
 				} else if (lab[_x][_y][_z] == MASK && dist[_x][_y][_z] == 0) { // (_x, _y, _z) is plateau voxel
 					dist[_x][_y][_z] = curdist + 1;
 					queue.push(CellIndex(_x, _y, _z));
 				}
 			}
+
+			/// DEBUG ///
+			/*
+                        if (idx.x == 76 && idx.y == 93 && idx.z == 105) {
+				printf("lab[%d][%d][%d] = %d\n", idx.x, idx.y, idx.z, lab[idx.x][idx.y][idx.z]);
+				printf("End of 76, 93, 105\n");
+                                exit(0);
+			}
+			*/
 		}
 
 		// New minima at level current height
@@ -386,6 +425,9 @@ void VincentSoille() {
 			dist[idx.x][idx.y][idx.z] = 0;
 
 			if (lab[idx.x][idx.y][idx.z] == MASK) {
+				/// DEBUG ///
+				printf("%d %d %d: %lf\n", idx.x, idx.y, idx.z, ftleValues[idx.x][idx.y][idx.z]);
+
 				curlab++;
 				queue.push(idx);
 				lab[idx.x][idx.y][idx.z] = curlab;
@@ -402,6 +444,7 @@ void VincentSoille() {
 						if (lab[_x][_y][_z] == MASK) {
 							queue.push(CellIndex(_x, _y, _z));
 							lab[_x][_y][_z] = curlab;
+                                                        printf("%d %d %d\n", _x, _y, _z);
 						}
 					}
 				}
@@ -418,7 +461,8 @@ void VincentSoille() {
 	int *labelColors = new int [curlab + 1];
 	for (int i = 0; i <= curlab; i++)
 		labelColors[i] = i;
-	std::random_shuffle(labelColors, labelColors + curlab + 1);
+	/// DEBUG ///
+	// std::random_shuffle(labelColors, labelColors + curlab + 1);
 
 	printf("curlab = %d\n", curlab);
 
@@ -459,13 +503,14 @@ void VincentSoille() {
  	}
 
 	result->GetPointData()->SetScalars(region_code);
-	//result->GetPointData()->SetScalars(ftle_value);
+	// result->GetPointData()->SetScalars(ftle_value);
 
 	result->PrintSelf(std::cout, vtkIndent(0));
 
 	vtkSmartPointer<vtkStructuredPointsWriter> s_writer = vtkSmartPointer<vtkStructuredPointsWriter>::New();
 	s_writer->SetInputData(result);
 	s_writer->SetFileName("int_watershed.vtk");
+        // s_writer->SetFileName("smoothed_ftle.vtk");
 	s_writer->Write();
 	
 	/* End of write */
@@ -542,10 +587,10 @@ int main() {
 	*/
 	LoadGrid();
 	//GaussianSmoothing();
-	/*
-	for (int i = 0; i < 40; i++)
-		LaplacianSmoothing();
-	*/
+	
+	//for (int i = 0; i < 40; i++)
+	//	LaplacianSmoothing();
+	
 	VincentSoille();
 	
 	DeleteCube(ftleValues);
